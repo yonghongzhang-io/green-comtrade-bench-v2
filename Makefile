@@ -1,0 +1,31 @@
+SHELL := /bin/sh
+
+.PHONY: up fixtures stage test test-one logs readme-check clean
+
+up:
+	docker compose down -v
+	docker compose up -d --build
+
+stage:
+	bash scripts/stage_fixtures.sh
+
+fixtures:
+	python3 gen_fixtures.py
+	bash scripts/stage_fixtures.sh
+
+test:
+	bash scripts/run_all.sh
+
+test-one:
+	bash scripts/run_one.sh $(TASK)
+
+logs:
+	docker compose logs -f --tail=200
+
+readme-check:
+	python3 -c "import pathlib; p=pathlib.Path('README.md').resolve(); print(p)"
+	head -n 5 README.md
+	wc -l README.md
+
+clean:
+	docker compose down -v

@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  mock-comtrade:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./mock_service:/app/mock_service
+    command: >
+      sh -lc "pip install --no-cache-dir fastapi uvicorn pydantic &&
+                uvicorn mock_service.app:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  green-agent:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - MOCK_URL=http://mock-comtrade:8000
+      - PURPLE_OUTPUT_ROOT=/workspace/purple_output
+      - PORT=9009
+    volumes:
+      - ./src:/app/src
+      - ./_purple_output:/workspace/purple_output
+    command: >
+      sh -lc "pip install --no-cache-dir fastapi uvicorn pydantic requests &&
+                python -m src.agent"
+    ports:
+      - "9009:9009"
+    depends_on:
+      - mock-comtrade

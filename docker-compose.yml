@@ -1,0 +1,23 @@
+services:
+  mock-comtrade:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock
+    ports:
+      - "8000:8000"
+
+  green-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.green
+    environment:
+      - MOCK_URL=http://mock-comtrade:8000
+      - PURPLE_OUTPUT_ROOT=/workspace/purple_output
+      - PORT=9009
+    volumes:
+      - ./src:/app/src
+      - ./_purple_output:/workspace/purple_output:delegated
+    ports:
+      - "9009:9009"
+    depends_on:
+      - mock-comtrade
