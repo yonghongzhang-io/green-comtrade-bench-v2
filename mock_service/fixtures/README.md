@@ -22,6 +22,8 @@ Totals rows use the following marker (all must match):
 
 Totals rows should be dropped by the Purple agent before writing `data.jsonl`.
 
+**Note:** In totals_trap mode, the mock service prepends one synthetic totals row to every /records response, so totals rows may be numerous depending on the client's pagination strategy; agents must filter all rows matching (isTotal=true AND partner="WLD" AND hs="TOTAL").
+
 ## Regenerating Fixtures
 
 You can create synthetic fixtures via:

@@ -1,0 +1,5 @@
+Green Bench v1.0: Deterministic offline benchmark for agentic data extraction from mock Comtrade-like API.
+Tasks T1–T7 inject faults (pagination, duplicates, HTTP 429/500, page drift, totals trap) to test robust fetching + deduplication.
+Agents interface via A2A JSON-RPC endpoints (/.well-known/agent.json, /healthz, /a2a/rpc) or direct REST (/assess).
+Scoring contract enforces correctness (deduplicated JSONL output), completeness (all pages fetched), and robustness (retry evidence in logs).
+Docker-reproducible, fixture-driven, evaluated offline by green_judge.py against normative EVALUATION_CONTRACT.md.
