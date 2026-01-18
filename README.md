@@ -1,6 +1,6 @@
 # green-comtrade-bench
 
-[![CI](https://github.com/zhyh87/green-comtrade-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/zhyh87/green-comtrade-bench/actions/workflows/ci.yml)
+[![CI](https://github.com/yonghongzhang-io/green-comtrade-bench-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/yonghongzhang-io/green-comtrade-bench-v2/actions/workflows/ci.yml)
 
 Deterministic, offline Comtrade-like benchmark (Green agent) with a configurable mock service and a scoring judge. It is designed to evaluate Purple agents on pagination, de-duplication, retries (429/500), page drift, and totals handling.
 
@@ -47,7 +47,7 @@ This Green bench provides deterministic offline evaluation with a mock Comtrade 
 **AgentBeats Integration:**
 - Leaderboard query: `agentbeats_leaderboard.sql`
 - Repository: Public with webhook configured
-- Docker image: `ghcr.io/zhyh87/green-comtrade-bench:latest`
+- Docker image: `ghcr.io/yonghongzhang-io/green-comtrade-bench-v2:latest`
 
 **CI Reproducibility:**
 - Pipeline: `make clean` → `make up` → wait + health checks → `make fixtures` → `make test` → cleanup (always)
@@ -177,13 +177,13 @@ See **EVALUATION_CONTRACT.md** for the full schema, stop reasons, and scoring br
 
 | Repository | Description |
 |------------|-------------|
-| [Leaderboard](https://github.com/zhyh87/agentbeats-leaderboard) | Submission tracking and automated assessment |
+| [Leaderboard](https://github.com/yonghongzhang-io/agentbeats-leaderboard-v2) | Submission tracking and automated assessment |
 | [Baseline Purple Agent](file:///Users/sarah/Desktop/Antigravity/TEST/green-comtrade-bench/baseline_purple) | Reference implementation (this repo) |
 
 ### AgentBeats URLs
 
-- **Green Agent**: https://agentbeats.dev/zhyh87/green-comtrade-bench *(coming soon)*
-- **Leaderboard**: https://agentbeats.dev/zhyh87/green-comtrade-bench-leaderboard *(coming soon)*
+- **Green Agent**: https://agentbeats.dev/yonghongzhang-io/green-comtrade-bench-v2 *(coming soon)*
+- **Leaderboard**: https://agentbeats.dev/yonghongzhang-io/agentbeats-leaderboard-v2 *(coming soon)*
 
 ## Demo Video
 
