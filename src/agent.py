@@ -162,9 +162,9 @@ def assess(req: AssessRequest) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @app.get("/.well-known/agent.json")
-def a2a_agent_card() -> Dict[str, Any]:
+def a2a_agent_card():
     """A2A Agent Card discovery endpoint."""
-    return AGENT_CARD
+    return JSONResponse(content=AGENT_CARD)
 
 
 @app.get("/health")
@@ -180,9 +180,13 @@ def healthz() -> Dict[str, Any]:
 
 
 @app.get("/.well-known/agent-card.json")
-def a2a_agent_card_json() -> Dict[str, Any]:
-    """A2A Agent Card discovery endpoint (alternate path)."""
-    return AGENT_CARD
+def a2a_agent_card_json():
+    """A2A Agent Card discovery endpoint (alternate path).
+    
+    Returns full AGENT_CARD dict via JSONResponse to avoid any response_model filtering.
+    Smoke test: curl -s http://localhost:9009/.well-known/agent-card.json | jq .
+    """
+    return JSONResponse(content=AGENT_CARD)
 
 
 # ---------------------------------------------------------------------------
