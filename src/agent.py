@@ -62,7 +62,12 @@ AGENT_CARD = {
     "defaultInputModes": ["application/json"],
     "defaultOutputModes": ["application/json"],
     "skills": [
-        {"name": "a2a.rpc", "description": "Handle A2A JSON-RPC requests via /a2a/rpc"}
+        {
+            "id": "a2a.rpc",
+            "name": "a2a.rpc",
+            "description": "Handle A2A JSON-RPC requests via /a2a/rpc",
+            "tags": ["a2a", "rpc"],
+        }
     ],
 }
 
