@@ -180,10 +180,12 @@ def healthz() -> Dict[str, Any]:
 
 
 @app.get("/.well-known/agent-card.json")
+@app.post("/.well-known/agent-card.json")
 def a2a_agent_card_json():
     """A2A Agent Card discovery endpoint (alternate path).
     
     Returns full AGENT_CARD dict via JSONResponse to avoid any response_model filtering.
+    Supports both GET and POST methods for compatibility with different A2A clients.
     Smoke test: curl -s http://localhost:9009/.well-known/agent-card.json | jq .
     """
     return JSONResponse(content=AGENT_CARD)
