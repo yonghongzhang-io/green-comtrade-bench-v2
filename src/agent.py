@@ -433,18 +433,24 @@ def a2a_rpc(req: JsonRpcRequest) -> JSONResponse:
                 config = content.get("config", {})
                 tasks = config.get("tasks", [])
 
-                # For now, return a simple acknowledgment
+                # Return A2A standard message response
                 # TODO: Implement actual task execution and evaluation
-                return _jsonrpc_success(req_id, {
-                    "type": "text",
-                    "content": json.dumps({
-                        "message": "Green agent received evaluation request",
-                        "participants": list(participants.keys()),
-                        "tasks_count": len(tasks),
-                        "tasks": tasks,
-                        "note": "Full evaluation logic to be implemented"
-                    })
-                })
+                result_message = {
+                    "kind": "message",
+                    "role": "agent",
+                    "parts": [{
+                        "kind": "text",
+                        "text": json.dumps({
+                            "status": "acknowledged",
+                            "message": "Green agent received evaluation request",
+                            "participants": list(participants.keys()),
+                            "tasks_count": len(tasks),
+                            "tasks": tasks,
+                            "note": "Full evaluation logic to be implemented"
+                        })
+                    }]
+                }
+                return _jsonrpc_success(req_id, {"message": result_message})
 
             # Legacy format: single task_id
             task_id = content.get("task_id")
