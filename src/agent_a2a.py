@@ -8,23 +8,27 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import httpx
 import requests
 import uvicorn
 from pydantic import BaseModel
 
+from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCard, AgentSkill, AgentCapabilities, TaskState, Part, TextPart
-from a2a.utils import new_agent_text_message
+from a2a.utils import new_agent_text_message, new_message_from_text
 
 from .tasks import get_task
 from .judge import score_output
@@ -91,33 +95,166 @@ class GreenComtradeBenchJudge:
             )
         )
 
-        # TODO: Implement actual task execution
-        # For now, return acknowledgment
-        results = {
-            "status": "acknowledged",
-            "tasks": tasks,
-            "participants": list(participants.keys()),
-            "note": "Full evaluation implementation in progress"
-        }
+        # Get purple agent endpoint
+        if "purple-comtrade-baseline-v2" not in participants:
+            raise ValueError("purple-comtrade-baseline-v2 participant not found")
+
+        purple_url = participants["purple-comtrade-baseline-v2"]
+        logger.info(f"Purple agent endpoint: {purple_url}")
+
+        # Run each task
+        all_results = []
+        for task_id in tasks:
+            await updater.update_status(
+                TaskState.working,
+                new_agent_text_message(f"Running task: {task_id}")
+            )
+            logger.info(f"Starting task: {task_id}")
+
+            # Get task definition
+            task = get_task(task_id)
+            if not task:
+                logger.error(f"Unknown task_id: {task_id}")
+                all_results.append({
+                    "task_id": task_id,
+                    "score_total": 0.0,
+                    "error": f"Unknown task_id: {task_id}"
+                })
+                continue
+
+            # Configure mock service
+            try:
+                logger.info(f"Configuring mock service for {task_id}")
+                r = requests.post(
+                    f"{self.mock_url}/configure",
+                    json={
+                        "task_id": task.task_id,
+                        "query": task.query,
+                        "constraints": task.constraints,
+                        "fault_injection": task.fault_injection,
+                    },
+                    timeout=5,
+                )
+                r.raise_for_status()
+                logger.info(f"Mock service configured for {task_id}")
+            except Exception as e:
+                logger.error(f"Failed to configure mock service: {e}")
+                all_results.append({
+                    "task_id": task_id,
+                    "score_total": 0.0,
+                    "error": f"Failed to configure mock service: {e}"
+                })
+                continue
+
+            # Call purple agent via A2A
+            try:
+                logger.info(f"Calling purple agent for {task_id}")
+                async with httpx.AsyncClient(timeout=300) as httpx_client:
+                    resolver = A2ACardResolver(httpx_client=httpx_client, base_url=purple_url)
+                    agent_card = await resolver.get_agent_card()
+                    client_config = ClientConfig(httpx_client=httpx_client, streaming=False)
+                    factory = ClientFactory(client_config)
+                    client = factory.create(agent_card)
+
+                    # Send task request to purple agent
+                    task_message = new_message_from_text(
+                        json.dumps({
+                            "task_id": task_id,
+                            "mock_url": self.mock_url,
+                            "output_dir": f"/workspace/purple_output/{task_id}"
+                        })
+                    )
+
+                    async for event in client.send_message(task_message):
+                        # Just consume events, purple agent will write to file system
+                        pass
+
+                    logger.info(f"Purple agent completed {task_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to call purple agent: {e}")
+                all_results.append({
+                    "task_id": task_id,
+                    "score_total": 0.0,
+                    "error": f"Failed to call purple agent: {e}"
+                })
+                continue
+
+            # Wait a bit for file system writes to complete
+            await asyncio.sleep(2)
+
+            # Read purple output and score
+            try:
+                out_dir = self.purple_output_root / task_id
+                tmp_root = Path("/tmp/purple_output_cache")
+                tmp_dir = tmp_root / task_id
+
+                logger.info(f"Staging outputs from {out_dir} to {tmp_dir}")
+                if tmp_dir.exists():
+                    shutil.rmtree(tmp_dir)
+                shutil.copytree(out_dir, tmp_dir)
+
+                logger.info(f"Scoring output for {task_id}")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        score_output,
+                        tmp_dir,
+                        task_expected={
+                            "task_id": task.task_id,
+                            "query": task.query,
+                            "constraints": task.constraints,
+                            "fault_injection": task.fault_injection,
+                        },
+                    )
+                    result = future.result(timeout=self.score_timeout)
+
+                logger.info(f"Task {task_id} scored: {result.total}")
+                all_results.append({
+                    "task_id": task_id,
+                    "score_total": result.total,
+                    "score_breakdown": result.breakdown,
+                    "errors": result.errors,
+                    "details": result.details,
+                })
+
+            except Exception as e:
+                logger.error(f"Failed to score output: {e}")
+                all_results.append({
+                    "task_id": task_id,
+                    "score_total": 0.0,
+                    "error": f"Failed to score output: {e}"
+                })
+                continue
+
+        # Calculate total score
+        total_score = sum(r.get("score_total", 0.0) for r in all_results)
+        avg_score = total_score / len(all_results) if all_results else 0.0
 
         await updater.update_status(
             TaskState.working,
-            new_agent_text_message(f"Evaluation complete: {json.dumps(results, indent=2)}")
+            new_agent_text_message(
+                f"Evaluation complete\nTotal score: {total_score:.2f}\nAverage: {avg_score:.2f}"
+            )
         )
 
         # Add result artifact
         summary = f"""Comtrade Benchmark Results
 ===================================
-Tasks: {len(tasks)}
-Participants: {list(participants.keys())}
-Status: Acknowledged
+Tasks completed: {len(all_results)}/{len(tasks)}
+Total score: {total_score:.2f}
+Average score: {avg_score:.2f}
 
-Note: Full evaluation implementation in progress
+Per-task results:
 """
+        for r in all_results:
+            summary += f"\n{r['task_id']}: {r.get('score_total', 0.0):.2f}"
+            if 'error' in r:
+                summary += f" (ERROR: {r['error']})"
+
         await updater.add_artifact(
             parts=[
                 Part(root=TextPart(text=summary)),
-                Part(root=TextPart(text=json.dumps(results, indent=2))),
+                Part(root=TextPart(text=json.dumps(all_results, indent=2))),
             ],
             name="Result",
         )
