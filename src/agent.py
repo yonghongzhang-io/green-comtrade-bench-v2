@@ -406,23 +406,25 @@ def a2a_rpc(req: JsonRpcRequest) -> JSONResponse:
     # -------------------------------------------------------------------------
     elif method == "message/send":
         try:
-            # Extract message content
+            import json
+
+            # Extract message content (A2A standard format)
             message = params.get("message", {})
-            content = message.get("content", {})
+            parts = message.get("parts", [])
 
-            # Debug: log the received params
-            logger.info(f"message/send received params: {params}")
-            logger.info(f"message: {message}")
-            logger.info(f"content type: {type(content)}, value: {content}")
+            # Get text from first part
+            if not parts:
+                return _jsonrpc_error(req_id, -32602, "Invalid params: message must have parts")
 
-            if isinstance(content, str):
-                # Try parsing as JSON if string
-                import json
-                try:
-                    content = json.loads(content)
-                    logger.info(f"Parsed content: {content}")
-                except json.JSONDecodeError:
-                    return _jsonrpc_error(req_id, -32602, "Invalid params: content must be valid JSON object")
+            content_text = parts[0].get("text", "")
+            logger.info(f"Extracted content_text: {content_text}")
+
+            # Parse JSON content
+            try:
+                content = json.loads(content_text) if content_text else {}
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parse error: {e}")
+                return _jsonrpc_error(req_id, -32602, f"Invalid params: content must be valid JSON: {e}")
 
             # Check if this is AgentBeats EvalRequest format (participants + config)
             if "participants" in content and "config" in content:
