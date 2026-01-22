@@ -159,20 +159,29 @@ class GreenComtradeBenchJudge:
                     client = factory.create(agent_card)
 
                     # Send task request to purple agent
+                    task_payload = {
+                        "task_id": task_id,
+                        "mock_url": self.mock_url,
+                        "output_dir": f"/workspace/purple_output/{task_id}"
+                    }
+                    logger.info(f"Task payload: {json.dumps(task_payload)}")
+
                     task_message = Message(
                         kind="message",
                         role=Role.user,
-                        parts=[Part(root=TextPart(kind="text", text=json.dumps({
-                            "task_id": task_id,
-                            "mock_url": self.mock_url,
-                            "output_dir": f"/workspace/purple_output/{task_id}"
-                        })))],
+                        parts=[Part(root=TextPart(kind="text", text=json.dumps(task_payload)))],
                         message_id=uuid4().hex,
                         context_id=None
                     )
 
+                    # Debug: log message structure
+                    logger.info(f"Message structure: kind={task_message.kind}, role={task_message.role}, parts={len(task_message.parts)}")
+                    if task_message.parts:
+                        logger.info(f"First part type: {type(task_message.parts[0])}")
+
                     async for event in client.send_message(task_message):
                         # Just consume events, purple agent will write to file system
+                        logger.info(f"Received event from purple agent: {type(event)}")
                         pass
 
                     logger.info(f"Purple agent completed {task_id}")
