@@ -410,11 +410,17 @@ def a2a_rpc(req: JsonRpcRequest) -> JSONResponse:
             message = params.get("message", {})
             content = message.get("content", {})
 
+            # Debug: log the received params
+            logger.info(f"message/send received params: {params}")
+            logger.info(f"message: {message}")
+            logger.info(f"content type: {type(content)}, value: {content}")
+
             if isinstance(content, str):
                 # Try parsing as JSON if string
                 import json
                 try:
                     content = json.loads(content)
+                    logger.info(f"Parsed content: {content}")
                 except json.JSONDecodeError:
                     return _jsonrpc_error(req_id, -32602, "Invalid params: content must be valid JSON object")
 
