@@ -23,7 +23,7 @@ from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCard, AgentSkill, AgentCapabilities, TaskState
+from a2a.types import AgentCard, AgentSkill, AgentCapabilities, TaskState, Part, TextPart
 from a2a.utils import new_agent_text_message
 
 from .tasks import get_task
@@ -103,6 +103,23 @@ class GreenComtradeBenchJudge:
         await updater.update_status(
             TaskState.working,
             new_agent_text_message(f"Evaluation complete: {json.dumps(results, indent=2)}")
+        )
+
+        # Add result artifact
+        summary = f"""Comtrade Benchmark Results
+===================================
+Tasks: {len(tasks)}
+Participants: {list(participants.keys())}
+Status: Acknowledged
+
+Note: Full evaluation implementation in progress
+"""
+        await updater.add_artifact(
+            parts=[
+                Part(root=TextPart(text=summary)),
+                Part(root=TextPart(text=json.dumps(results, indent=2))),
+            ],
+            name="Result",
         )
 
     def validate_request(self, request: EvalRequest) -> tuple[bool, str]:
