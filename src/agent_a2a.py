@@ -417,6 +417,90 @@ async def main():
 
     # Build app
     app = a2a_server.build()
+    
+    # Add /assess endpoint for backward compatibility with CI tests
+    from starlette.routing import Route
+    from starlette.responses import JSONResponse as StarletteJSONResponse
+    import shutil as shutil_module
+    import concurrent.futures as cf
+    
+    async def assess_endpoint(request):
+        """Backward-compatible /assess endpoint for CI testing."""
+        try:
+            body = await request.json()
+            task_id = body.get("task_id")
+            purple_output_subdir = body.get("purple_output_subdir")
+            
+            if not task_id:
+                return StarletteJSONResponse({"error": "task_id required"}, status_code=400)
+            
+            task = get_task(task_id)
+            if task is None:
+                return StarletteJSONResponse({"error": f"Unknown task_id: {task_id}"}, status_code=404)
+            
+            logger.info(f"assess start task_id={task_id}")
+            
+            # Configure mock service
+            try:
+                r = requests.post(
+                    f"{agent.mock_url}/configure",
+                    json={
+                        "task_id": task.task_id,
+                        "query": task.query,
+                        "constraints": task.constraints,
+                        "fault_injection": task.fault_injection,
+                    },
+                    timeout=5,
+                )
+                r.raise_for_status()
+            except Exception as e:
+                return StarletteJSONResponse({"error": f"Failed to configure mock: {e}"}, status_code=500)
+            
+            # Score output
+            out_dir = agent.purple_output_root / (purple_output_subdir or task_id)
+            tmp_root = Path("/tmp/purple_output_cache")
+            tmp_dir = tmp_root / (purple_output_subdir or task_id)
+            
+            try:
+                if tmp_dir.exists():
+                    shutil_module.rmtree(tmp_dir)
+                shutil_module.copytree(out_dir, tmp_dir)
+            except Exception as e:
+                return StarletteJSONResponse({"error": f"Failed to stage outputs: {e}"}, status_code=500)
+            
+            try:
+                with cf.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        score_output,
+                        tmp_dir,
+                        task_expected={
+                            "task_id": task.task_id,
+                            "query": task.query,
+                            "constraints": task.constraints,
+                            "fault_injection": task.fault_injection,
+                        },
+                    )
+                    result = future.result(timeout=agent.score_timeout)
+                
+                return StarletteJSONResponse({
+                    "task_id": task_id,
+                    "score_total": result.total,
+                    "score_breakdown": result.breakdown,
+                    "errors": result.errors,
+                })
+            except Exception as e:
+                return StarletteJSONResponse({"error": f"Scoring failed: {e}"}, status_code=500)
+                
+        except Exception as e:
+            return StarletteJSONResponse({"error": str(e)}, status_code=500)
+    
+    # Add /healthz endpoint
+    async def healthz_endpoint(request):
+        return StarletteJSONResponse({"status": "ok"})
+    
+    # Add routes to the app
+    app.routes.append(Route("/assess", assess_endpoint, methods=["POST"]))
+    app.routes.append(Route("/healthz", healthz_endpoint, methods=["GET"]))
 
     logger.info(f"Starting Green Comtrade Bench on {args.host}:{args.port}")
     logger.info(f"Agent URL: {agent_url}")
