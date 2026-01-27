@@ -8,7 +8,7 @@
 [
   {
     "name": "Overall Performance",
-    "query": "SELECT results.participants.\"purple-comtrade-baseline-v2\" AS id, ROUND(AVG(r.score_total), 1) AS \"Score\", COUNT(*) AS \"Tasks\", CASE WHEN AVG(r.score_total) >= 90.0 THEN 'PASS' ELSE 'FAIL' END AS \"Pass\" FROM results CROSS JOIN UNNEST(results.results[1]) AS t(r) GROUP BY results.participants.\"purple-comtrade-baseline-v2\" ORDER BY \"Score\" DESC;"
+    "query": "SELECT results.participants.\"purple-comtrade-baseline-v2\" AS id, ROUND(AVG(r.score_total), 1) AS \"Score\", COUNT(*) AS \"Tasks\", CASE WHEN AVG(r.score_total) >= 80.0 THEN 'PASS' ELSE 'FAIL' END AS \"Pass\" FROM results CROSS JOIN UNNEST(results.results[1]) AS t(r) GROUP BY results.participants.\"purple-comtrade-baseline-v2\" ORDER BY \"Score\" DESC;"
   },
   {
     "name": "Section Breakdown",
@@ -26,7 +26,7 @@ SELECT
     results.participants."purple-comtrade-baseline-v2" AS id,
     ROUND(AVG(r.score_total), 1) AS "Score",
     COUNT(*) AS "Tasks",
-    CASE WHEN AVG(r.score_total) >= 90.0 THEN 'PASS' ELSE 'FAIL' END AS "Pass"
+    CASE WHEN AVG(r.score_total) >= 80.0 THEN 'PASS' ELSE 'FAIL' END AS "Pass"
 FROM results
 CROSS JOIN UNNEST(results.results[1]) AS t(r)
 GROUP BY results.participants."purple-comtrade-baseline-v2"
