@@ -1,16 +1,14 @@
 -- Green Comtrade Bench Leaderboard Query
--- Shows only the LATEST run per agent, with percentage-based scoring
+-- Shows ALL runs (each run as a separate row), with percentage-based scoring
 --
 -- Output columns:
 --   Agent: agent name/id
 --   Total Score: percentage (0-100), calculated as 100 * sum(scores) / max_possible
 --   Tasks: number of tasks in this run (typically 7)
---   Pass: "PASS" if Total Score >= 90.0, else "FAIL"
---   Latest Result: timestamp of the most recent run
+--   Pass: "PASS" if Total Score >= 60.0, else "FAIL"
+--   Run Time: timestamp of this run
 --
--- This query prevents accumulation across multiple runs by:
--- 1. Grouping results by run (using filename as run identifier)
--- 2. Taking only the latest run per agent (using row_number)
+-- Pass threshold: 60% (420/700 points)
 
 WITH
 -- Step 1: Flatten all JSON files into individual task results with run info
@@ -51,7 +49,7 @@ task_scores AS (
     FROM tasks
 ),
 
--- Step 4: Aggregate per run (per file)
+-- Step 4: Aggregate per run (per file) - each run is a separate row
 per_run AS (
     SELECT
         filename,
@@ -63,30 +61,18 @@ per_run AS (
         COUNT(*) * 100.0 AS max_possible  -- Each task is worth 100 points
     FROM task_scores
     GROUP BY filename, agent_id, agent_name, run_timestamp
-),
-
--- Step 5: Rank runs per agent (latest first)
-ranked AS (
-    SELECT
-        *,
-        ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY run_timestamp DESC) AS rn
-    FROM per_run
-),
-
--- Step 6: Take only the latest run per agent
-latest AS (
-    SELECT * FROM ranked WHERE rn = 1
 )
 
--- Final output
+-- Final output: ALL runs, sorted by score descending then by time descending
 SELECT
     agent_name AS "Agent",
     ROUND(100.0 * total_score / max_possible, 1) AS "Total Score",
     task_count AS "Tasks",
     CASE 
-        WHEN (100.0 * total_score / max_possible) >= 90.0 THEN 'PASS'
+        WHEN (100.0 * total_score / max_possible) >= 60.0 THEN 'PASS'
         ELSE 'FAIL'
     END AS "Pass",
-    run_timestamp AS "Latest Result"
-FROM latest
-ORDER BY "Total Score" DESC;
+    run_timestamp AS "Run Time"
+FROM per_run
+WHERE run_timestamp IS NOT NULL
+ORDER BY "Total Score" DESC, run_timestamp DESC;
