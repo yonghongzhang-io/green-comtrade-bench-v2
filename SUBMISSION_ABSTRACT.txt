@@ -1,5 +1,114 @@
-Green Bench v1.0: Deterministic offline benchmark for agentic data extraction from mock Comtrade-like API.
-Tasks T1–T7 inject faults (pagination, duplicates, HTTP 429/500, page drift, totals trap) to test robust fetching + deduplication.
-Agents interface via A2A JSON-RPC endpoints (/.well-known/agent.json, /healthz, /a2a/rpc) or direct REST (/assess).
-Scoring contract enforces correctness (deduplicated JSONL output), completeness (all pages fetched), and robustness (retry evidence in logs).
-Docker-reproducible, fixture-driven, evaluated offline by green_judge.py against normative EVALUATION_CONTRACT.md.
+Green Comtrade Bench v2: A Deterministic Benchmark for Agentic Data Extraction
+================================================================================
+
+Category: Finance Agent
+Author: Yonghong Zhang (zhyh87)
+Platform: https://agentbeats.dev/zhyh87/green-comtrade-bench-v2
+
+1. Motivation
+-------------
+Autonomous agents increasingly interact with real-world REST APIs to retrieve
+financial and trade data. These APIs present challenges that go beyond simple
+HTTP requests: paginated responses, duplicate records across pages, transient
+server errors (HTTP 429/500), non-deterministic row ordering, and hidden totals
+rows that pollute aggregates. Existing benchmarks rarely test these operational
+concerns in combination. Green Comtrade Bench v2 fills this gap with a
+controlled, reproducible evaluation of an agent's ability to reliably extract,
+deduplicate, and validate data from a Comtrade-like trade statistics API.
+
+2. Benchmark Design
+--------------------
+The benchmark consists of 7 progressive tasks (T1-T7), each injecting a
+distinct fault mode into a mock Comtrade API service:
+
+  T1  Single Page       No faults. Baseline schema and metadata correctness.
+  T2  Multi-Page        Pagination across 5 pages; agent must fetch and merge all.
+  T3  Duplicates        8% within-page + 3% cross-page duplicates; agent must
+                        deduplicate by composite primary key.
+  T4  Rate Limit (429)  Transient HTTP 429 responses; agent must implement
+                        backoff and retry logic.
+  T5  Server Error (500) Transient HTTP 500 responses; agent must retry with
+                        bounded attempts.
+  T6  Page Drift        Same page returns different row orderings across requests;
+                        agent must canonicalize and reconcile.
+  T7  Totals Trap       Hidden totals rows (isTotal=true, partner="WLD",
+                        hs="TOTAL") injected; agent must detect and remove them.
+
+All tasks run against a deterministic mock service (FastAPI) that simulates the
+UN Comtrade API with configurable fault injection. No external network access
+is required -- the entire evaluation is offline and Docker-reproducible.
+
+3. Evaluation Methodology
+--------------------------
+Each task is scored on 6 dimensions (100 points per task, 700 total):
+
+  Correctness    (30 pts)  Row count accuracy, schema completeness, query
+                           matching, deduplication quality.
+  Completeness   (15 pts)  All required metadata fields present (task_id,
+                           query, row_count, schema, dedup_key).
+  Robustness     (15 pts)  Evidence of retry logic for 429/500 errors,
+                           exponential backoff in logs.
+  Efficiency     (15 pts)  Request count relative to task-specific baselines;
+                           time penalty threshold (>45s loses 3 pts).
+  Data Quality   (15 pts)  Type consistency, value range validation, data
+                           integrity checks.
+  Observability  (10 pts)  Required traceable fields in logs (task_id, page,
+                           request, complete), structured log levels, stop
+                           reason indicator.
+
+Anti-gaming governance gates enforce meaningful scores:
+  - Completeness Gate: incomplete outputs receive zero efficiency credit.
+  - Correctness Gate: correctness below 70% caps efficiency and observability
+    at 50%.
+  - Observability rewards traceability, not log verbosity.
+
+4. Agent Output Contract
+-------------------------
+Purple agents submit file-based outputs per task:
+
+  _purple_output/<task_id>/
+      data.jsonl       Row-level trade data (JSON Lines, UTF-8)
+      metadata.json    Run metadata with query params, row counts, schema
+      run.log          Execution log with traceable fields
+
+All scoring is deterministic: same output always produces the same score.
+SHA-256 hashes of data and metadata are recorded for audit.
+
+5. A2A Protocol Integration
+-----------------------------
+The green agent exposes standard A2A (Agent-to-Agent) endpoints:
+  - GET  /.well-known/agent.json   Agent discovery card
+  - POST /a2a/rpc                  JSON-RPC 2.0 evaluation methods
+  - GET  /healthz                  Container health check
+
+Purple agents are discovered and invoked via the A2A Client SDK. The green
+agent configures the mock service, dispatches tasks to the purple agent,
+stages outputs, and scores them -- all within a single Docker Compose
+environment.
+
+6. Reproducibility
+-------------------
+The benchmark is fully reproducible via CI:
+  make clean -> make up -> healthcheck -> make fixtures -> make test -> cleanup
+
+GitHub Actions runs this pipeline on every push. Results are deterministic
+across runs due to: fixed task definitions, seeded mock service, offline
+evaluation, and reproducible file hashing.
+
+7. Baseline Results
+--------------------
+A deterministic baseline purple agent (no LLM required) achieves 87-90 avg
+score across all 7 tasks, demonstrating that high scores are attainable
+through proper engineering: pagination handling, retry with backoff,
+deduplication by primary key, and structured logging. This establishes a
+meaningful floor for LLM-powered agents to improve upon.
+
+8. Key Contributions
+---------------------
+  - Fault-injection benchmark targeting real-world API interaction challenges
+    that existing benchmarks overlook.
+  - Multi-dimensional scoring (6 axes) with governance gates to prevent gaming.
+  - Fully offline, deterministic, Docker-reproducible evaluation.
+  - Native A2A protocol support for AgentBeats leaderboard integration.
+  - Normative evaluation contract (EVALUATION_CONTRACT.md) defining exact
+    output specifications and scoring rules.
