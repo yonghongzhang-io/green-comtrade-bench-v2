@@ -101,20 +101,25 @@ def _dedup_check_jsonl(p: Path, key_fields: List[str]) -> Tuple[int, int]:
 
 def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult:
     """
-    Enhanced scoring with multiple dimensions:
-    - correctness (40 points): Data accuracy with gradient scoring
-    - completeness (20 points): Required files and fields
-    - robustness (20 points): Error handling capability  
-    - efficiency (20 points): Request count and execution time
+    Comprehensive scoring with 6 dimensions:
     
-    Total: 100 points with gradient scoring (not just 0 or 100)
+    - correctness (30 points): Data accuracy with gradient scoring
+    - completeness (15 points): Required files and fields
+    - robustness (15 points): Error handling capability  
+    - efficiency (15 points): Request count and execution time
+    - data_quality (15 points): NEW - Content validation, type checking
+    - observability (10 points): NEW - Logging quality, traceability
+    
+    Total: 100 points with gradient scoring
     """
     errors: List[str] = []
     breakdown: Dict[str, float] = {
         "correctness": 0.0, 
         "completeness": 0.0,
         "robustness": 0.0, 
-        "efficiency": 0.0
+        "efficiency": 0.0,
+        "data_quality": 0.0,
+        "observability": 0.0
     }
     details: Dict[str, Any] = {}
 
@@ -145,10 +150,10 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
     except OSError as e:
         return ScoreResult(0.0, breakdown, [f"metadata.json could not be read: {e}"], details)
 
-    # ============ COMPLETENESS (20 points) ============
+    # ============ COMPLETENESS (15 points) ============
     needed_meta_fields = ["task_id", "query", "row_count", "schema", "dedup_key"]
     fields_present = sum(1 for f in needed_meta_fields if f in meta)
-    breakdown["completeness"] = (fields_present / len(needed_meta_fields)) * 20.0
+    breakdown["completeness"] = (fields_present / len(needed_meta_fields)) * 15.0
     
     for f in needed_meta_fields:
         if f not in meta:
@@ -158,10 +163,10 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
     details["row_count_actual"] = row_count_actual
     details["row_count_declared"] = meta.get("row_count")
 
-    # ============ CORRECTNESS (40 points) - Gradient scoring ============
+    # ============ CORRECTNESS (30 points) - Gradient scoring ============
     correctness = 0.0
     
-    # Row count accuracy (15 points) - gradient based on accuracy
+    # Row count accuracy (12 points) - gradient based on accuracy
     expected_rows = task_expected.get("constraints", {}).get("total_rows", 0)
     declared_rows = meta.get("row_count", 0)
     
@@ -169,39 +174,39 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
         # Calculate accuracy percentage
         row_accuracy = 1.0 - abs(row_count_actual - expected_rows) / max(expected_rows, 1)
         row_accuracy = max(0.0, min(1.0, row_accuracy))
-        correctness += row_accuracy * 15.0
+        correctness += row_accuracy * 12.0
         details["row_accuracy_pct"] = round(row_accuracy * 100, 1)
         
         if row_count_actual != expected_rows:
             errors.append(f"Row count: got {row_count_actual}, expected {expected_rows} (accuracy: {row_accuracy*100:.1f}%)")
     elif meta.get("row_count") == row_count_actual:
-        correctness += 15.0
+        correctness += 12.0
     else:
         errors.append(f"Row count mismatch: declared={meta.get('row_count')} actual={row_count_actual}")
 
-    # Schema validation (5 points)
+    # Schema validation (4 points)
     schema = meta.get("schema") or []
     if isinstance(schema, list):
         expected_schema_len = 9  # Full schema has 9 columns
         schema_completeness = min(len(schema) / expected_schema_len, 1.0)
-        correctness += schema_completeness * 5.0
+        correctness += schema_completeness * 4.0
         details["schema_completeness_pct"] = round(schema_completeness * 100, 1)
         if len(schema) < 5:
             errors.append(f"Schema incomplete: {len(schema)} columns, expected >= 5")
     else:
         errors.append("Schema must be a list")
 
-    # Query matching (5 points)
+    # Query matching (4 points)
     expected_query = task_expected.get("query", {})
     got_query = meta.get("query", {})
     query_fields = ["reporter", "partner", "flow", "hs", "year"]
     query_matches = sum(1 for k in query_fields 
                        if expected_query.get(k) is None or got_query.get(k) == expected_query.get(k))
-    correctness += (query_matches / len(query_fields)) * 5.0
+    correctness += (query_matches / len(query_fields)) * 4.0
     if query_matches < len(query_fields):
         errors.append(f"Query mismatch: {query_matches}/{len(query_fields)} fields correct")
 
-    # Deduplication check (10 points) - gradient based on duplicate rate
+    # Deduplication check (6 points) - gradient based on duplicate rate
     dedup_key = meta.get("dedup_key") or []
     if isinstance(dedup_key, list) and len(dedup_key) >= 3:
         total_rows, unique_rows = _dedup_check_jsonl(data_path, dedup_key)
@@ -210,37 +215,35 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
         
         if total_rows > 0:
             dedup_quality = unique_rows / total_rows
-            correctness += dedup_quality * 10.0
+            correctness += dedup_quality * 6.0
             details["dedup_quality_pct"] = round(dedup_quality * 100, 1)
             if unique_rows < total_rows:
                 dup_count = total_rows - unique_rows
                 errors.append(f"Found {dup_count} duplicates ({(1-dedup_quality)*100:.1f}% duplicate rate)")
         else:
-            correctness += 10.0
+            correctness += 6.0
     else:
         errors.append("dedup_key invalid; expect list with >= 3 fields.")
 
-    # Data content validation (5 points) - check data integrity
-    try:
-        data_valid = _validate_data_content(data_path, meta.get("schema", []))
-        correctness += data_valid * 5.0
-        details["data_integrity_pct"] = round(data_valid * 100, 1)
-    except Exception as e:
-        errors.append(f"Data validation error: {e}")
+    # Declared vs actual consistency (4 points)
+    if meta.get("row_count") == row_count_actual:
+        correctness += 4.0
+    else:
+        errors.append(f"Declared row_count ({meta.get('row_count')}) != actual ({row_count_actual})")
 
     # Totals handling check for T7_totals_trap
     if task_expected.get("fault_injection", {}).get("mode") == "totals_trap":
         totals_handling = meta.get("totals_handling", {})
         if not totals_handling.get("enabled"):
             errors.append("T7_totals_trap requires totals_handling.enabled=true")
-            correctness -= 5.0
+            correctness -= 4.0
         elif totals_handling.get("rows_dropped", 0) < 1:
             errors.append("T7_totals_trap: no rows dropped")
-            correctness -= 3.0
+            correctness -= 2.0
 
-    breakdown["correctness"] = max(0.0, min(40.0, correctness))
+    breakdown["correctness"] = max(0.0, min(30.0, correctness))
 
-    # ============ ROBUSTNESS (20 points) ============
+    # ============ ROBUSTNESS (15 points) ============
     log_text = _read_text_retry(log_path, encoding="utf-8", errors="ignore").lower()
     robustness = 0.0
     mode = task_expected.get("fault_injection", {}).get("mode")
@@ -252,11 +255,11 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
         has_exponential = "exponential" in log_text or "backoff" in log_text
         
         if has_429 and has_retry:
-            robustness = 15.0
+            robustness = 12.0
             if has_exponential:
-                robustness = 20.0  # Bonus for proper exponential backoff
+                robustness = 15.0  # Bonus for proper exponential backoff
         elif has_retry:
-            robustness = 10.0
+            robustness = 8.0
         else:
             errors.append("No evidence of 429 handling in run.log")
             
@@ -266,26 +269,26 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
         has_limit = "max" in log_text or "limit" in log_text
         
         if has_500 and has_retry:
-            robustness = 15.0
+            robustness = 12.0
             if has_limit:
-                robustness = 20.0  # Bonus for retry limits
+                robustness = 15.0  # Bonus for retry limits
         elif has_retry:
-            robustness = 10.0
+            robustness = 8.0
         else:
             errors.append("No evidence of 500 handling in run.log")
     else:
         # For other modes, check log quality
         log_lines = log_text.strip().split('\n')
         if len(log_lines) >= 5:
-            robustness = 20.0
-        elif len(log_lines) >= 3:
             robustness = 15.0
+        elif len(log_lines) >= 3:
+            robustness = 12.0
         elif len(log_text.strip()) > 10:
-            robustness = 10.0
+            robustness = 8.0
 
     breakdown["robustness"] = robustness
 
-    # ============ EFFICIENCY (20 points) ============
+    # ============ EFFICIENCY (15 points) ============
     efficiency = 0.0
     
     # Parse execution metrics from metadata or log
@@ -299,7 +302,7 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
     constraints = task_expected.get("constraints", {})
     max_requests = constraints.get("max_requests", 100)
     
-    # Request efficiency (10 points)
+    # Request efficiency (8 points)
     if request_count > 0 and max_requests > 0:
         # Lower request count = better efficiency
         request_efficiency = 1.0 - min(request_count / max_requests, 1.0)
@@ -309,26 +312,86 @@ def score_output(output_dir: Path, task_expected: Dict[str, Any]) -> ScoreResult
         min_requests_needed = max(1, total_rows // page_size)
         
         if request_count >= min_requests_needed:
-            efficiency += (0.5 + request_efficiency * 0.5) * 10.0
+            efficiency += (0.5 + request_efficiency * 0.5) * 8.0
         else:
-            efficiency += request_efficiency * 5.0
+            efficiency += request_efficiency * 4.0
         
         details["request_count"] = request_count
         details["request_efficiency_pct"] = round(request_efficiency * 100, 1)
     else:
-        efficiency += 10.0  # Default if not measurable
+        efficiency += 8.0  # Default if not measurable
     
-    # Time efficiency (10 points) - if available
+    # Time efficiency (7 points) - if available
     if exec_time > 0:
         # Assume 60 seconds is baseline, faster = better
         time_efficiency = max(0, 1.0 - exec_time / 60.0)
-        efficiency += time_efficiency * 10.0
+        efficiency += time_efficiency * 7.0
         details["execution_time_seconds"] = exec_time
         details["time_efficiency_pct"] = round(time_efficiency * 100, 1)
     else:
-        efficiency += 10.0  # Default if not measurable
+        efficiency += 7.0  # Default if not measurable
 
-    breakdown["efficiency"] = min(20.0, efficiency)
+    breakdown["efficiency"] = min(15.0, efficiency)
+
+    # ============ DATA QUALITY (15 points) - NEW ============
+    data_quality = 0.0
+    
+    # Content validation (5 points) - check data integrity
+    try:
+        data_valid = _validate_data_content(data_path, meta.get("schema", []))
+        data_quality += data_valid * 5.0
+        details["data_integrity_pct"] = round(data_valid * 100, 1)
+    except Exception as e:
+        errors.append(f"Data validation error: {e}")
+    
+    # Type consistency (5 points) - check if values have consistent types
+    try:
+        type_score = _check_type_consistency(data_path)
+        data_quality += type_score * 5.0
+        details["type_consistency_pct"] = round(type_score * 100, 1)
+    except Exception as e:
+        errors.append(f"Type check error: {e}")
+    
+    # Value range validation (5 points) - check if numeric values are reasonable
+    try:
+        range_score = _check_value_ranges(data_path, task_expected)
+        data_quality += range_score * 5.0
+        details["value_range_pct"] = round(range_score * 100, 1)
+    except Exception as e:
+        errors.append(f"Value range check error: {e}")
+    
+    breakdown["data_quality"] = min(15.0, data_quality)
+
+    # ============ OBSERVABILITY (10 points) - NEW ============
+    observability = 0.0
+    log_lines = log_text.strip().split('\n')
+    
+    # Log completeness (4 points) - sufficient logging
+    if len(log_lines) >= 10:
+        observability += 4.0
+    elif len(log_lines) >= 5:
+        observability += 3.0
+    elif len(log_lines) >= 2:
+        observability += 2.0
+    details["log_line_count"] = len(log_lines)
+    
+    # Structured logging (3 points) - has INFO/WARN/ERROR levels
+    has_info = "info" in log_text
+    has_warn = "warn" in log_text
+    has_error = "error" in log_text
+    log_levels = sum([has_info, has_warn, has_error])
+    observability += log_levels
+    details["log_levels_used"] = log_levels
+    
+    # Traceability (3 points) - timestamps, task_id mentions
+    has_timestamp = any(c.isdigit() and ':' in log_text for c in log_text[:100])
+    has_task_id = meta.get("task_id", "").lower() in log_text
+    has_request_tracking = "request" in log_text or "page" in log_text
+    traceability = sum([has_timestamp, has_task_id, has_request_tracking])
+    observability += traceability
+    details["traceability_score"] = traceability
+    
+    breakdown["observability"] = min(10.0, observability)
 
     details["data_sha256"] = _sha256_file(data_path)
     details["metadata_sha256"] = _sha256_file(meta_path)
@@ -366,3 +429,93 @@ def _validate_data_content(data_path: Path, schema: List[str]) -> float:
         return valid_rows / total_rows if total_rows > 0 else 0.0
     
     return _with_retries(_validate)
+
+
+def _check_type_consistency(data_path: Path) -> float:
+    """Check if fields have consistent types across rows. Returns score 0.0 - 1.0"""
+    def _check():
+        field_types: Dict[str, set] = {}
+        total_rows = 0
+        
+        with data_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                total_rows += 1
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if k not in field_types:
+                                field_types[k] = set()
+                            # Track type (allow None as compatible with any type)
+                            if v is not None:
+                                field_types[k].add(type(v).__name__)
+                except json.JSONDecodeError:
+                    pass
+        
+        if not field_types:
+            return 0.0
+        
+        # Score based on type consistency (1 type per field is best)
+        consistent_fields = sum(1 for types in field_types.values() if len(types) <= 1)
+        return consistent_fields / len(field_types)
+    
+    return _with_retries(_check)
+
+
+def _check_value_ranges(data_path: Path, task_expected: Dict[str, Any]) -> float:
+    """Check if numeric values are within reasonable ranges. Returns score 0.0 - 1.0"""
+    def _check():
+        total_checks = 0
+        valid_checks = 0
+        
+        # Expected year range
+        expected_year = task_expected.get("query", {}).get("year")
+        
+        with data_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if not isinstance(obj, dict):
+                        continue
+                    
+                    # Check year field if present
+                    if "year" in obj:
+                        total_checks += 1
+                        year_val = obj["year"]
+                        if isinstance(year_val, (int, float)):
+                            # Year should be reasonable (1900-2100)
+                            if 1900 <= year_val <= 2100:
+                                valid_checks += 1
+                                # Bonus if matches expected year
+                                if expected_year and year_val == expected_year:
+                                    valid_checks += 0.5
+                                    total_checks += 0.5
+                    
+                    # Check trade value if present (should be non-negative)
+                    for val_field in ["value", "trade_value", "tradeValue", "primaryValue"]:
+                        if val_field in obj:
+                            total_checks += 1
+                            val = obj[val_field]
+                            if isinstance(val, (int, float)) and val >= 0:
+                                valid_checks += 1
+                    
+                    # Check quantity if present (should be non-negative)
+                    for qty_field in ["qty", "quantity", "netWgt"]:
+                        if qty_field in obj:
+                            total_checks += 1
+                            qty = obj[qty_field]
+                            if qty is None or (isinstance(qty, (int, float)) and qty >= 0):
+                                valid_checks += 1
+                                
+                except json.JSONDecodeError:
+                    pass
+        
+        return valid_checks / total_checks if total_checks > 0 else 1.0
+    
+    return _with_retries(_check)
