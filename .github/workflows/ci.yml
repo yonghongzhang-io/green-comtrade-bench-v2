@@ -20,6 +20,11 @@ jobs:
         run: |
           pip install -e .
 
+      - name: Prepare output directory
+        run: |
+          mkdir -p _purple_output
+          chmod 777 _purple_output
+
       - name: Clean and start services
         run: |
           make clean
@@ -31,12 +36,6 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:9009/healthz 2>/dev/null; do sleep 2; done'
           timeout 60 bash -c 'until curl -f http://localhost:8000/docs 2>/dev/null; do sleep 2; done'
           echo "Services are ready"
-
-      - name: Fix output directory permissions
-        run: |
-          sudo rm -rf _purple_output || true
-          mkdir -p _purple_output
-          chmod 777 _purple_output
 
       - name: Run baseline purple agent
         run: |
@@ -50,6 +49,13 @@ jobs:
           cat _purple_output/T2_multi_page/metadata.json | head -20 || true
           echo "=== T2 row count ==="
           wc -l _purple_output/T2_multi_page/data.jsonl || true
+
+      - name: Restart green-agent to refresh volume mount
+        run: |
+          docker compose restart green-agent
+          sleep 5
+          timeout 60 bash -c 'until curl -f http://localhost:9009/healthz 2>/dev/null; do sleep 2; done'
+          echo "Green agent restarted and ready"
 
       - name: Run tests
         run: |
