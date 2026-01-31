@@ -295,7 +295,15 @@ See **EVALUATION_CONTRACT.md** for the full schema, stop reasons, and scoring br
 
 ## Demo Video
 
-*Coming soon - will showcase baseline purple agent running against all T1-T7 tasks*
+[![Green Comtrade Bench Demo](https://img.youtube.com/vi/JPap8xPvRL4/maxresdefault.jpg)](https://www.youtube.com/watch?v=JPap8xPvRL4)
+
+> 📺 **Watch the full demo:** [https://youtu.be/JPap8xPvRL4](https://youtu.be/JPap8xPvRL4)
+
+This 3-minute video demonstrates:
+- ✅ GitHub repository structure and public accessibility
+- ✅ Docker images pullable from GHCR without authentication
+- ✅ Local execution of T2_multi_page task with 98.7/100 score
+- ✅ AgentBeats platform integration with leaderboard results
 
 ## Contract Validation (Offline)
 
