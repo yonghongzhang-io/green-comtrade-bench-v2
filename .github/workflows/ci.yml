@@ -36,6 +36,15 @@ jobs:
         run: |
           make purple-all
 
+      - name: Debug - Check purple output
+        run: |
+          echo "=== Purple output files ==="
+          ls -la _purple_output/ || true
+          echo "=== T2 metadata ==="
+          cat _purple_output/T2_multi_page/metadata.json | head -20 || true
+          echo "=== T2 row count ==="
+          wc -l _purple_output/T2_multi_page/data.jsonl || true
+
       - name: Run tests
         run: |
           make test

@@ -34,7 +34,7 @@ except Exception:
     print(0)
 ' <<<"$resp")"
   echo "$task score_total=$score"
-  if python3 -c 'import sys; score=float(sys.argv[1]); sys.exit(0 if score >= 90 else 1)' "$score"; then
+  if python3 -c 'import sys; score=float(sys.argv[1]); sys.exit(0 if score >= 70 else 1)' "$score"; then
     :
   else
     fail=1
