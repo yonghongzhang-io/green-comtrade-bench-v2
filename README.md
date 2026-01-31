@@ -49,13 +49,6 @@ This Green bench provides deterministic offline evaluation with a mock Comtrade 
 - Repository: Public with webhook configured
 - Docker image: `ghcr.io/yonghongzhang-io/green-comtrade-bench-v2:latest`
 
-**System Requirements:**
-- Memory: 2 GB Docker daemon allocation (Green ~512 MB + Mock ~256 MB + Purple ~512 MB)
-- Disk: ~500 MB (Docker images + fixture data)
-- CPU: 1+ cores sufficient (single-threaded scoring)
-- Time: ~30 s per task, ~210 s total for 7 tasks in CI
-- No GPU or LLM API keys required
-
 **CI Reproducibility:**
 - Pipeline: `make clean` → `make up` → wait + health checks → `make fixtures` → `make test` → cleanup (always)
 - Environment: GitHub Actions ubuntu-latest with Docker Compose v2
