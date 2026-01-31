@@ -28,13 +28,23 @@ for task in "${TASKS[@]}"; do
   fi
   # Debug: print full response
   echo "DEBUG $task response: $resp"
-  score="$(python3 -c 'import json,sys; 
+  score="$(python3 -c 'import json,sys
 try:
-    data=json.loads(sys.stdin.read()); 
+    data=json.loads(sys.stdin.read())
     print(data.get("score_total", 0))
 except Exception as e:
-    print(f"PARSE_ERROR: {e}", file=sys.stderr)
+    import sys as s
+    s.stderr.write("PARSE_ERROR: " + str(e) + "\n")
     print(0)
 ' <<<"$resp")"
   echo "$task score_total=$score"
-  if python3 -c 'import sys; score=float(sys.argv[1]); sys
+  if python3 -c 'import sys; score=float(sys.argv[1]); sys.exit(0 if score >= 70 else 1)' "$score"; then
+    :
+  else
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  exit 1
+fi
