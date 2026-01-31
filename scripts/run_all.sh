@@ -26,11 +26,14 @@ for task in "${TASKS[@]}"; do
     fail=1
     continue
   fi
+  # Debug: print full response
+  echo "DEBUG $task response: $resp"
   score="$(python3 -c 'import json,sys; 
 try:
     data=json.loads(sys.stdin.read()); 
     print(data.get("score_total", 0))
-except Exception:
+except Exception as e:
+    print(f"PARSE_ERROR: {e}", file=sys.stderr)
     print(0)
 ' <<<"$resp")"
   echo "$task score_total=$score"
