@@ -32,6 +32,12 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:8000/docs 2>/dev/null; do sleep 2; done'
           echo "Services are ready"
 
+      - name: Fix output directory permissions
+        run: |
+          sudo rm -rf _purple_output || true
+          mkdir -p _purple_output
+          chmod 777 _purple_output
+
       - name: Run baseline purple agent
         run: |
           make purple-all
