@@ -1,21 +1,64 @@
-# green-comtrade-bench
+# Green Comtrade Bench v2
 
 [![CI](https://github.com/yonghongzhang-io/green-comtrade-bench-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/yonghongzhang-io/green-comtrade-bench-v2/actions/workflows/ci.yml)
 
-Deterministic, offline Comtrade-like benchmark (Green agent) with a configurable mock service and a scoring judge. It is designed to evaluate Purple agents on pagination, de-duplication, retries (429/500), page drift, and totals handling.
+> **Supporting benchmark infrastructure for ComtradeBench.** For the current flagship 10-task OpenEnv benchmark, cross-model evaluation, and training results, see **[comtrade-openenv](https://github.com/yonghongzhang-io/comtrade-openenv)**.
 
-## Installation
+Green Comtrade Bench v2 is a deterministic, offline benchmark and scoring judge for evaluating agents under Comtrade-like API conditions. It uses a configurable mock service so that pagination, duplicates, transient failures, page drift, and totals handling can be tested reproducibly.
 
-**Recommended (development)**:
+The repository originated as the **Green-agent evaluation side** of the AgentBeats workflow and now serves as a transparent reference implementation of the benchmark contract and judge.
+
+## What it evaluates
+
+The benchmark tests whether an agent can complete data-retrieval workflows correctly when the API is not perfectly clean.
+
+| Task | Fault mode | What it tests |
+|---|---|---|
+| `T1_single_page` | none | baseline schema and metadata |
+| `T2_multi_page` | none | pagination correctness |
+| `T3_duplicates` | duplicates | de-duplication under `dedup_key` |
+| `T4_rate_limit_429` | rate limit | retry/backoff on HTTP 429 |
+| `T5_server_error_500` | server error | retry on HTTP 500 |
+| `T6_page_drift` | page drift | canonical sorting and convergence |
+| `T7_totals_trap` | totals trap | filtering totals rows and reporting handling |
+
+Authoritative task definitions live in `src/tasks.py`.
+
+## Scoring
+
+Each task is scored across six dimensions for a total of 100 points.
+
+| Dimension | Points | Signal |
+|---|---:|---|
+| **Correctness** | 30 | data accuracy, query match, row count, schema, deduplication |
+| **Completeness** | 15 | required files and metadata are present |
+| **Robustness** | 15 | appropriate handling of 429/500 and other faults |
+| **Efficiency** | 15 | request discipline relative to task-specific baselines |
+| **Data quality** | 15 | type consistency, integrity, and valid outputs |
+| **Observability** | 10 | traceable execution fields and useful audit logs |
+
+The scoring implementation is in [`src/judge.py`](src/judge.py).
+
+### Governance rules
+
+The judge is designed to discourage gaming and reward complete, traceable execution.
+
+- **Completeness gate:** incomplete required outputs receive no efficiency credit.
+- **Correctness gate:** low correctness caps efficiency and observability credit.
+- **Efficiency is task-aware:** pagination-heavy tasks are compared with task-specific request baselines.
+- **Observability means traceability, not verbosity:** longer logs do not receive more points unless they contain the fields needed to reconstruct execution.
+
+## Quick start
+
+### Install
+
 ```bash
 pip install -e .
 ```
 
-This installs the package in editable mode from `pyproject.toml`, which is the canonical source for all dependencies.
+`pyproject.toml` is the canonical dependency source.
 
-**Why pyproject.toml?** Modern Python packaging standard (PEP 518/517). Ensures identical dependencies across local development, Docker builds, and CI. The `requirements.txt` file is deprecated and kept only for backward compatibility.
-
-## Quickstart
+### Run the benchmark locally
 
 ```bash
 make clean
@@ -30,348 +73,115 @@ Run one task:
 make test-one TASK=T6_page_drift
 ```
 
-Endpoints:
-- Mock service (Swagger UI): http://localhost:8000/docs
-- Green agent card:         http://localhost:9009/agent-card
-- Assess endpoint:          http://localhost:9009/assess
+Useful local endpoints:
 
-## AgentBeats Submission
-
-This Green bench provides deterministic offline evaluation with a mock Comtrade API and automated scoring. Purple agents submit file-based outputs under `_purple_output/<task_id>/`.
-
-**A2A Endpoints:**
-- `GET /.well-known/agent.json` — Agent discovery
-- `POST /a2a/rpc` — JSON-RPC 2.0 (methods: tasks/send, tasks/get, tasks/cancel, tasks/sendSubscribe)
-- `GET /healthz` — Health check
-
-**AgentBeats Integration:**
-- Leaderboard query: `agentbeats_leaderboard.sql`
-- Repository: Public with webhook configured
-- Docker image: `ghcr.io/yonghongzhang-io/green-comtrade-bench-v2:latest`
-
-**CI Reproducibility:**
-- Pipeline: `make clean` → `make up` → wait + health checks → `make fixtures` → `make test` → cleanup (always)
-- Environment: GitHub Actions ubuntu-latest with Docker Compose v2
-- Workflow: `.github/workflows/ci.yml` runs on main branch pushes and PRs
-- Status: See badge above for current CI state
-
-**A2A Mapping:** The `tasks/send` method calls the same internal logic as `POST /assess`. Example:
-
-```bash
-curl -X POST http://localhost:9009/a2a/rpc -H 'Content-Type: application/json' -d '{
-  "jsonrpc": "2.0", "id": "1", "method": "tasks/send",
-  "params": {"task": {"input": {"type": "object", "content": {"task_id": "T6_page_drift"}}}}
-}'
-```
-
-Response includes `result.task.output.content` with `score_total`, `score_breakdown`, `errors`, and `details`.
-
-## Baseline Purple Agent
-
-The `baseline_purple/` module provides a reference Purple agent implementation for validating the benchmark.
-
-**Key Features:**
-- Calls POST `/configure` to set up mock service per task
-- Fetches records from GET `/records` with pagination
-- Implements deterministic retry/backoff for HTTP 429 and 500
-- Handles T7 totals rows correctly (drops marker rows)
-- Outputs contract-compliant files to `_purple_output/<task_id>/`
-
-**Agent Modes:**
-
-The baseline agent runs in **fixed mode** by default:
-- Uses deterministic logic (no LLM)
-- Can achieve high scores on many tasks with robust error handling
-- Demonstrates proper pagination, retry logic, and data validation
-
-> **Note**: Actual scores are environment-dependent and require validation via CI artifacts. Competitive performance requires robust error handling, retries, deduplication, and careful logging under adversarial conditions.
-
-**Run single task:**
-```bash
-make purple-one TASK=T1_single_page
-```
-
-**Run all tasks:**
-```bash
-make purple-all
-```
-
-**Validate outputs:**
-```bash
-make purple-all && make test
-```
-
-This baseline demonstrates that competitive scores don't require LLMs—just robust HTTP handling and data quality checks.
-
-
-## Layout
-
-```text
-green-comtrade-bench/
-  mock_service/           # FastAPI mock Comtrade-like API
-  mock_service/fixtures/  # Optional file-backed datasets (*.jsonl)
-  src/                    # Green agent + judge
-  scripts/                # dev_up/stage_fixtures/run_one/run_all
-  _purple_output/         # Fixture source directory staged into /workspace/purple_output
-  docker-compose.yml
-  Makefile
-  EVALUATION_CONTRACT.md
-```
-
-## Tasks (T1–T7)
-
-| task_id             | fault mode   | what it tests                         |
-|---------------------|--------------|-------------------------------------|
-| T1_single_page       | none         | baseline schema/metadata             |
-| T2_multi_page        | none         | pagination correctness               |
-| T3_duplicates       | duplicates   | de-dup under `dedup_key`             |
-| T4_rate_limit_429    | rate_limit   | retry/backoff on 429                 |
-| T5_server_error_500  | server_error | retry on 500                        |
-| T6_page_drift        | page_drift   | canonical sort + convergence         |
-| T7_totals_trap       | totals_trap  | drop totals rows + report totals_handling |
-
-Authoritative task definitions live in `src/tasks.py`.
-
-## How Scoring Works
-
-Each task is evaluated against **6 dimensions** (100 points total per task, 700 total for 7 tasks):
-
-| Dimension | Points | What it Measures |
-|-----------|--------|------------------|
-| **correctness** | 30 | Data accuracy: row count, schema, query match, deduplication |
-| **completeness** | 15 | Required files present, metadata fields complete |
-| **robustness** | 15 | Error handling: 429/500 retry logic with backoff |
-| **efficiency** | 15 | Request count relative to task baseline (stable metrics) |
-| **data_quality** | 15 | Type consistency, value ranges, data integrity |
-| **observability** | 10 | Traceable fields for debugging and audit trails |
-
-**Scoring Implementation**: [`src/judge.py:score_output()`](src/judge.py)
-
----
-
-## Scoring Philosophy / Governance
-
-This benchmark is designed for **reproducibility**, **fairness**, and **anti-gaming**. The following governance rules are enforced:
-
-### Dimension Purposes
-
-| Dimension | Engineering Signal | Why It Matters |
-|-----------|-------------------|----------------|
-| correctness | Core task success | Did the agent solve the actual problem? |
-| completeness | Contract compliance | Are all required outputs present? |
-| robustness | Fault tolerance | Can the agent handle real-world failures? |
-| efficiency | Resource discipline | Does the agent avoid unnecessary work? |
-| data_quality | Output reliability | Is the data trustworthy and well-formed? |
-| observability | Debuggability | Can we trace what happened if something fails? |
-
-### Governance Rules (Anti-Gaming)
-
-**1. Completeness Gate**
-- If `completeness < 100%`, then `efficiency = 0`
-- *Rationale*: You cannot claim efficiency credit for incomplete work
-
-**2. Correctness Gate**
-- If `correctness < 70%` (< 21/30 points), then:
-  - `efficiency` capped at 50%
-  - `observability` capped at 50%
-- *Rationale*: Quality signals are meaningless if the core task is largely wrong
-
-**3. Efficiency Stability**
-- Request count is scored against **task-specific baselines** (not absolute counts)
-- Execution time uses **threshold penalty** (> 45s), not continuous gradient
-- *Rationale*: Pagination-heavy tasks shouldn't be penalized; wall-clock variance shouldn't affect scores
-
-**4. Observability = Traceability, Not Verbosity**
-- Points awarded for **required traceable fields** (task_id, page, request, complete)
-- Log length does NOT affect score
-- *Rationale*: Spamming logs is not observability; being able to debug is
-
-### Thresholds Reference
-
-| Threshold | Value | Effect |
-|-----------|-------|--------|
-| Correctness gate | 70% (21/30 pts) | Below → efficiency/observability capped at 50% |
-| Completeness gate | 100% (15/15 pts) | Below → efficiency = 0 |
-| Time penalty threshold | 45 seconds | Above → lose 3 efficiency points |
-
-### Task Efficiency Baselines
-
-| Task | Expected Requests | Notes |
-|------|-------------------|-------|
-| T1_single_page | 1 | Single page, minimal requests |
-| T2_multi_page | 5 | Multi-page pagination |
-| T3_duplicates | 3 | Deduplication task |
-| T4_rate_limit_429 | 4 | Includes retry overhead |
-| T5_server_error_500 | 4 | Includes retry overhead |
-| T6_page_drift | 3 | Page drift handling |
-| T7_totals_trap | 8 | Larger dataset with totals |
-
----
-
-## Anti-patterns (Will Score Poorly)
-
-The following behaviors are explicitly penalized or not rewarded:
-
-### ❌ Log Spam Without Traceability
-```text
-# BAD: Verbose but useless
-Processing... Processing... Processing... Done!
-
-# GOOD: Traceable fields
-[task_id=T1] page=1 request=GET /records complete=true
-```
-*Log length doesn't increase score. Missing traceable fields (task_id, page, request, complete) loses points.*
-
-### ❌ Sacrificing Correctness for Speed
-```text
-# BAD: Fast but wrong
-Requests: 1, Rows: 50 (expected: 800)
-```
-*Correctness < 70% caps efficiency at 50%. You can't "win" by being fast and wrong.*
-
-### ❌ Incomplete Outputs Claiming Efficiency
-```text
-# BAD: Missing metadata.json but low request count
-Files: [data.jsonl, run.log]  # metadata.json missing
-```
-*Completeness < 100% → efficiency = 0. Incomplete work gets no efficiency credit.*
-
-### ❌ Hardcoded / Fixture Outputs
-```text
-# BAD: Same output regardless of task
-data.jsonl: [same 100 rows for all tasks]
-```
-*Query matching and row count checks will fail. Correctness will be near 0.*
-
-### ❌ Ignoring Error Handling
-```text
-# BAD: No retry evidence for T4/T5
-run.log: "Got 429, giving up"
-```
-*Robustness score = 0 for fault tasks without proper retry/backoff evidence.*
-
----
-
-### Baseline Performance
-
-| Agent Mode | Performance | Notes |
-|------------|-------------|-------|
-| Baseline Purple (fixed) | ~85-95%* | Deterministic, no LLM required |
-| Baseline Purple (ground truth) | 100% (validation) | Validates judge correctness |
-
-*Environment-dependent; requires robust error handling, retries, and deduplication. Verify via CI artifacts.
-
-The baseline agent demonstrates that high scores are achievable with deterministic logic, proper pagination, and robust error handling—no LLM required.
+- Mock service / Swagger UI: `http://localhost:8000/docs`
+- Green agent card: `http://localhost:9009/agent-card`
+- Assessment endpoint: `http://localhost:9009/assess`
 
 ## Evaluation contract
 
-**The Evaluation Contract is normative.** In case of discrepancy, the Green judge implementation ([`src/judge.py:score_output()`](file:///Users/sarah/Desktop/Antigravity/TEST/green-comtrade-bench/src/judge.py#L102-L204)) is authoritative.
+The authoritative output and scoring contract is defined in **[EVALUATION_CONTRACT.md](EVALUATION_CONTRACT.md)** together with the judge implementation.
 
-The authoritative scoring/output contract is in **EVALUATION_CONTRACT.md**. Purple agents must write:
+Purple agents write:
 
-- `_purple_output/<task_id>/data.jsonl`
-- `_purple_output/<task_id>/metadata.json`
-- `_purple_output/<task_id>/run.log`
+```text
+_purple_output/<task_id>/data.jsonl
+_purple_output/<task_id>/metadata.json
+_purple_output/<task_id>/run.log
+```
 
-Key requirements (summary):
-- Deterministic `data.jsonl` ordering (stable sort) and de-dup under `dedup_key`.
-- `metadata.json.query` must match task query keys.
-- Fault tasks must show retry/backoff evidence in `run.log`.
-- Totals tasks must drop totals rows and report `totals_handling`.
+Key requirements include:
 
-See **EVALUATION_CONTRACT.md** for the full schema, stop reasons, and scoring breakdown.
+- deterministic output ordering and de-duplication under `dedup_key`
+- task-query consistency in `metadata.json`
+- retry/backoff evidence for injected fault tasks
+- explicit totals handling for totals-trap tasks
+- traceable run logs suitable for debugging and audit
 
-## Related Repositories
+## Reference baseline
 
-| Repository | Description |
-|------------|-------------|
-| [Leaderboard](https://github.com/yonghongzhang-io/agentbeats-leaderboard-v2) | Submission tracking and automated assessment |
-| [Baseline Purple Agent](file:///Users/sarah/Desktop/Antigravity/TEST/green-comtrade-bench/baseline_purple) | Reference implementation (this repo) |
+The repository contains a deterministic reference Purple implementation in `baseline_purple/`.
 
-### AgentBeats URLs
+It demonstrates that the benchmark is fundamentally about **robust execution**, not about requiring an LLM. A well-engineered rule-based client can perform strongly when it handles pagination, retries, deduplication, and data-quality checks correctly.
 
-- **Green Agent**: https://agentbeats.dev/yonghongzhang-io/green-comtrade-bench-v2 *(coming soon)*
-- **Leaderboard**: https://agentbeats.dev/yonghongzhang-io/agentbeats-leaderboard-v2 *(coming soon)*
+A standalone reference implementation is also available at **[purple-comtrade-baseline-v2](https://github.com/yonghongzhang-io/purple-comtrade-baseline-v2)**.
 
-## Demo Video
+## Offline validation
 
-[![Green Comtrade Bench Demo](https://img.youtube.com/vi/JPap8xPvRL4/maxresdefault.jpg)](https://www.youtube.com/watch?v=JPap8xPvRL4)
+The benchmark includes an offline validator for checking Purple outputs before evaluation.
 
-> 📺 **Watch the full demo:** [https://youtu.be/JPap8xPvRL4](https://youtu.be/JPap8xPvRL4)
+Example:
 
-This 3-minute video demonstrates:
-- ✅ GitHub repository structure and public accessibility
-- ✅ Docker images pullable from GHCR without authentication
-- ✅ Local execution of T2_multi_page task with 98.7/100 score
-- ✅ AgentBeats platform integration with leaderboard results
-
-## Contract Validation (Offline)
-
-The benchmark includes an offline validator to verify purple agent outputs against the [Evaluation Contract v1.0.0](file:///Users/sarah/Desktop/Antigravity/TEST/green-comtrade-bench/EVALUATION_CONTRACT.md).
-
-**Validate a single task:**
 ```bash
 python scripts/validate_purple_output.py _purple_output/T1_single_page \
   --task-query '{"reporter":"840","partner":"156","flow":"M","hs":"85","year":2021}' \
   --fault-mode none
 ```
 
-**Validate all tasks:**
-```bash
-for task in _purple_output/T*; do
-  python scripts/validate_purple_output.py "$task"
-done
-```
+The validator checks, among other things:
 
-**What it checks:**
-- ✓ Required files present (`data.jsonl`, `metadata.json`, `run.log`)
-- ✓ Valid JSON/JSONL with UTF-8 encoding
-- ✓ Mandatory fields and type constraints
-- ✓ Row count match between metadata and actual lines
-- ✓ Schema includes all required fields
-- ✓ Query parameters match task (type-aware)
-- ✓ No duplicate rows by dedup_key
-- ✓ Totals rows dropped (for T7)
-- ✓ Log evidence for fault handling
+- required output files
+- valid JSON / JSONL
+- mandatory metadata fields and types
+- row-count consistency
+- required schema fields
+- task-query consistency
+- duplicate records
+- totals filtering
+- fault-handling evidence in logs
 
-**CI Integration**: This validator can be integrated into CI pipelines to reject invalid Purple outputs before leaderboard ingestion, ensuring only contract-compliant submissions are processed.
+JSON schemas are available in `schemas/`.
 
-**Error codes:** See [EVALUATION_CONTRACT.md Appendix B](file:///Users/sarah/Desktop/Antigravity/TEST/green-comtrade-bench/EVALUATION_CONTRACT.md) for E001-E008 definitions.
+## Reproducibility
 
-**JSON Schemas:** Available in `schemas/` directory for automated validation:
-- `metadata.schema.json` — Validates `metadata.json` structure
-- `data_record.schema.json` — Validates individual JSONL record format
+The CI workflow runs the benchmark from a clean environment using Docker Compose and the same deterministic mock-service/judge logic used locally.
 
-### Minimal Passing run.log Example (T5_server_error_500)
-
-For tasks with fault injection (T4, T5), `run.log` must contain evidence of retry logic:
+Typical pipeline:
 
 ```text
-WARN HTTP 500 received, retrying request
-INFO Retry successful, continuing
+clean → start services → health checks → stage fixtures → evaluate → cleanup
 ```
 
-**Required patterns**:
-- T4 (rate_limit): Must include "429" AND ("retry" OR "backoff")
-- T5 (server_error): Must include "500" AND "retry"
+See `.github/workflows/ci.yml` and the CI badge above for the current state.
 
-## Troubleshooting
+## A2A / AgentBeats integration
 
-- **Check staged outputs:** `docker compose exec -T green-agent ls -lah /workspace/purple_output`
-- **macOS Docker file sharing (Errno 35 / deadlock):** avoid bind-mounting Purple output directories. This repo uses a named Docker volume for `/workspace/purple_output` and stages files via `make stage`.
-- **If scores/timeouts look wrong:** run a clean reset:
+The Green agent exposes A2A-compatible endpoints including:
 
-```bash
-make clean
-make up
-make fixtures
-make test
+- `GET /.well-known/agent.json`
+- `POST /a2a/rpc`
+- `GET /healthz`
+
+The A2A assessment path delegates to the same underlying evaluation logic as the local benchmark so the scoring contract remains consistent across execution modes.
+
+## Demo
+
+[![Green Comtrade Bench Demo](https://img.youtube.com/vi/JPap8xPvRL4/maxresdefault.jpg)](https://www.youtube.com/watch?v=JPap8xPvRL4)
+
+The demo walks through repository structure, containerized execution, an example benchmark task, and the evaluation workflow.
+
+## Repository layout
+
+```text
+green-comtrade-bench/
+├── mock_service/          # deterministic Comtrade-like API + fixtures
+├── src/                   # Green agent, tasks, and scoring judge
+├── scripts/               # local execution and validation utilities
+├── schemas/               # output schemas
+├── baseline_purple/       # reference Purple implementation
+├── _purple_output/        # staged agent outputs
+├── docker-compose.yml
+├── Makefile
+└── EVALUATION_CONTRACT.md
 ```
 
-- **View logs:**
+## Related repositories
 
-```bash
-make logs
-# or
-docker compose logs -f --tail=200
-```
+- **[ComtradeBench / OpenEnv](https://github.com/yonghongzhang-io/comtrade-openenv)** — current flagship research repository and 10-task benchmark
+- **[Purple Comtrade Baseline v2](https://github.com/yonghongzhang-io/purple-comtrade-baseline-v2)** — standalone deterministic reference agent
+- **[AgentBeats Leaderboard v2](https://github.com/yonghongzhang-io/agentbeats-leaderboard-v2)** — competition and submission infrastructure
+
+---
+
+This repository is maintained as a reproducible benchmark-infrastructure component of the broader **ComtradeBench** project.
